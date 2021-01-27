@@ -411,8 +411,9 @@ def generate_transform_matrices(mesh, factors):
     """
 
     factors = map(lambda x: 1.0 / x, factors)
-    M, A, D, U, F = [], [], [], [], []
+    M, A, D, U, F, V = [], [], [], [], [], []
     F.append(mesh.f)  # F[0]
+    V.append(mesh.v)
     A.append(get_vert_connectivity(mesh.v, mesh.f).astype('float32'))  # A[0]
     M.append(mesh)  # M[0]
 
@@ -423,11 +424,12 @@ def generate_transform_matrices(mesh, factors):
         new_mesh_v = ds_D.dot(M[-1].v)
         new_mesh = Mesh(v=new_mesh_v, f=ds_f)
         F.append(new_mesh.f)
+        V.append(new_mesh.v)
         M.append(new_mesh)
         A.append(get_vert_connectivity(new_mesh.v, new_mesh.f).astype('float32'))
         U.append(setup_deformation_transfer(M[-1], M[-2]).astype('float32'))
 
-    return M, A, D, U, F
+    return M, A, D, U, F, V
 
 
 
