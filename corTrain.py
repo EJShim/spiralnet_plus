@@ -9,7 +9,7 @@ import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
 from torch_geometric.data import DataLoader
 
-from . import run, Net
+from correspondence import run, Net
 from utils import preprocess_spiral
 from datasets import FAUST
 
@@ -26,7 +26,7 @@ parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--seed', type=int, default=1)
 args = parser.parse_args()
 
-args.data_fp = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data',args.dataset)
+args.data_fp = osp.join(osp.dirname(osp.realpath(__file__)), 'data',args.dataset)
 device = torch.device('cuda', args.device_idx)
 torch.set_num_threads(args.n_threads)
 
@@ -41,29 +41,19 @@ train_dataset = FAUST(args.data_fp, True)
 test_dataset = FAUST(args.data_fp, False)
 
 
-
 train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=1)
 
-
 d = train_dataset[0]
-
-print(d)
-
-
-exit()
 spiral_indices = preprocess_spiral(d.face.T, args.seq_length).to(device)
 target = torch.arange(d.num_nodes, dtype=torch.long, device=device)
-print(d)
+
 
 model = Net(d.num_features, d.num_nodes, spiral_indices).to(device)
-print(model)
-optimizer = optim.Adam(model.parameters(),
-                       lr=args.lr,
-                       weight_decay=args.weight_decay)
-scheduler = optim.lr_scheduler.StepLR(optimizer,
-                                      args.decay_step,
-                                      gamma=args.lr_decay)
 
-run(model, train_loader, test_loader, target, d.num_nodes, args.epochs,
-    optimizer, scheduler, device)
+
+
+optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+scheduler = optim.lr_scheduler.StepLR(optimizer, args.decay_step, gamma=args.lr_decay)
+
+run(model, train_loader, test_loader, target, d.num_nodes, args.epochs, optimizer, scheduler, device)

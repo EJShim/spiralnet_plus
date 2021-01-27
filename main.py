@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
-from psbody.mesh import Mesh
+# from psbody.mesh import Mesh
 
 from reconstruction import AE, run, eval_error
 from datasets import MeshData
@@ -47,14 +47,16 @@ parser.add_argument('--seed', type=int, default=1)
 args = parser.parse_args()
 
 args.work_dir = osp.dirname(osp.realpath(__file__))
-args.data_fp = osp.join(args.work_dir, '..', 'data', args.dataset)
+args.data_fp = osp.join(args.work_dir, 'data', args.dataset)
 args.out_dir = osp.join(args.work_dir, 'out', args.exp_name)
 args.checkpoints_dir = osp.join(args.out_dir, 'checkpoints')
-print(args)
+
 
 utils.makedirs(args.out_dir)
 utils.makedirs(args.checkpoints_dir)
 
+
+exit()
 writer = writer.Writer(args)
 device = torch.device('cuda', args.device_idx)
 torch.set_num_threads(args.n_threads)

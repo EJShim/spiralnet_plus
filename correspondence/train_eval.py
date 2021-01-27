@@ -33,6 +33,7 @@ def run(model, train_loader, test_loader, target, num_nodes, epochs, optimizer,
             't_duration': t_duration
         }
 
+
         print_info(eval_info)
 
 
@@ -43,10 +44,17 @@ def train(model, train_loader, target, optimizer, device):
     for idx, data in enumerate(train_loader):
         optimizer.zero_grad()
         x = data.x.to(device)
-        loss = F.nll_loss(model(x), target)
+        pred = model(x)
+
+ 
+        loss = F.nll_loss(pred, target)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
+
+
+        print(x.shape, pred.shape, target.shape, loss)
+
     return total_loss / len(train_loader)
 
 

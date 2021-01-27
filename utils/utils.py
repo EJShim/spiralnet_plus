@@ -16,8 +16,7 @@ def count_parameters(model):
 
 def to_sparse(spmat):
     return torch.sparse.FloatTensor(
-        torch.LongTensor([spmat.tocoo().row,
-                          spmat.tocoo().col]),
+        torch.LongTensor([spmat.tocoo().row, spmat.tocoo().col]),
         torch.FloatTensor(spmat.tocoo().data), torch.Size(spmat.tocoo().shape))
 
 
