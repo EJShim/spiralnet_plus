@@ -17,8 +17,13 @@ renWin = vtk.vtkRenderWindow()
 renWin.SetFullScreen(False)
 renWin.AddRenderer(ren)
 iren = vtk.vtkRenderWindowInteractor()
-iren.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
 iren.SetRenderWindow(renWin)
+
+#JPolydata
+reader  = vtk.vtkOBJReader()
+reader.SetFileName("data/CoMA/template/template.obj")
+reader.Update()
+polydata = reader.GetOutput()
 
 #Set Torch device
 device = "cpu"
@@ -56,6 +61,13 @@ def getOutputPoly(polydata, pred):
     return output
 
 
+def updatePoly(polydata, pred):
+    for pid, pos in enumerate(pred[0]):
+        polydata.GetPoints().SetPoint(pid, pos[0], pos[1], pos[2])
+    
+
+    polydata.GetPoints().Modified()
+
 
 def MakeActor(polydata):
     
@@ -71,10 +83,148 @@ def MakeActor(polydata):
 
 
 
+class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
+
+    def __init__(self, model, target, std, mean, samples, parent=None):
+
+
+        
+        self.AddObserver("LeftButtonPressEvent", self.LeftButtonPressed)
+        self.AddObserver("MouseMoveEvent", self.MouseMove)
+        self.AddObserver("LeftButtonReleaseEvent", self.LeftButtonReleased)
+
+
+        self.model = model
+        self.mean = mean
+        self.std = std
+
+
+        #Initialize Plane        
+        planeSource = vtk.vtkPlaneSource()
+        planeSource.SetCenter(0, 0, 0)
+        planeSource.Update()
+        planePoly = planeSource.GetOutput()
+        planePoly.GetPointData().RemoveArray("Normals")
+        self.planeActor = MakeActor(planePoly)
+        self.planeActor.GetProperty().SetRepresentationToWireframe()
+        self.planeActor.GetProperty().SetColor(1, 0, 0)
+
+
+    
+
+        ren.AddActor(self.planeActor)
+
+
+        #ADd Target Actor
+        target = target*std +mean
+        self.polydata = getOutputPoly(polydata, target)
+        self.actor = MakeActor(self.polydata)
+        ren.AddActor(self.actor)
+
+
+
+
+        bounds = self.planeActor.GetBounds()
+        self.latentPositions = np.array( [
+            [bounds[0], bounds[2], 0],
+            [bounds[0], bounds[3], 0],
+            [bounds[1], bounds[2], 0],
+            [bounds[1], bounds[3], 0]
+        ])
+        
+
+        self.latentSize = 16
+        self.outputLatents = []
+        #Add Sample Actor
+        for idx, sample in enumerate(samples):
+
+            #ADd Target Actor
+            z = self.model.encoder(sample.to(device))
+            self.latentSize = z.shape[1]
+            self.outputLatents.append(z[0])
+            sample = sample*std +mean
+            outpoly = getOutputPoly(polydata, sample)
+            actor = MakeActor(outpoly)
+            actor.SetPosition(self.latentPositions[idx])
+            ren.AddActor(actor)
+
+        self.pickedPosition = -1
+            
+
+    def LeftButtonPressed(self, obj, ev):
+        
+        self.OnLeftButtonDown()
+
+        pos = obj.GetInteractor().GetEventPosition()
+
+        picker = vtk.vtkCellPicker()
+        picker.PickFromListOn()
+        picker.AddPickList(self.planeActor)
+        picker.Pick(pos[0], pos[1], 0, ren)
+
+    
+
+        position = picker.GetPickPosition()
+        
+        if picker.GetActor() == self.planeActor:
+            self.pickedPosition = position
+
+            
+
+    def MouseMove(self, obj, ev):
+        if self.pickedPosition == -1:
+            self.OnMouseMove()
+            return
+
+        pos = obj.GetInteractor().GetEventPosition()
+
+        picker = vtk.vtkCellPicker()
+        picker.PickFromListOn()
+        picker.AddPickList(self.planeActor)
+        picker.Pick(pos[0], pos[1], 0, ren)
+        
+        
+        position = picker.GetPickPosition()
+        targetPos = np.array([position[0], position[1], 0])
+
+
+        if targetPos[0] < -0.5 : targetPos[0] = -0.5
+        elif targetPos[0] > 0.5 : targetPos[0] = 0.5
+        if targetPos[1] < -0.5 : targetPos[1] = -0.5
+        elif targetPos[1] > 0.5 : targetPos[1] = 0.5
+
+        distances = []
+        for sample in self.latentPositions:            
+            distances.append(np.linalg.norm(targetPos-sample))
+                
+
+        weights = np.array(distances)
+
+        weights[weights > 1] = 1
+        weights = 1 - weights
+        
+        calculatedLatent = torch.zeros(self.latentSize).to(device)
+
+        for idx, weight in enumerate(weights):
+            calculatedLatent += self.outputLatents[idx] * weight
+        
+
+        out = self.model.decoder(calculatedLatent)
+        out = out.detach().cpu()
+
+        target = out*self.std + self.mean
+        updatePoly(self.polydata, target)
+        renWin.Render()
+
+
+    def LeftButtonReleased(self, obj, ev):
+
+        self.pickedPosition = -1
+        self.OnLeftButtonUp()
 
 
 if __name__ == "__main__":
-
+    
     dilation = [1, 1, 1, 1]
     seq_length = [9, 9, 9, 9]
 
@@ -103,10 +253,6 @@ if __name__ == "__main__":
     std = meshdata.std
 
 
-    reader  = vtk.vtkOBJReader()
-    reader.SetFileName("data/CoMA/template/template.obj")
-    reader.Update()
-    polydata = reader.GetOutput()
 
 
     model = AE(3, [32, 32, 32,64], 16, spiral_indices_list, down_transform_list, up_transform_list).to(device)
@@ -114,54 +260,31 @@ if __name__ == "__main__":
     model.load_state_dict( checkpoint["model_state_dict"] )
     model.eval()
 
-
+    print(len(meshdata.train_dataset))
     train_loader = DataLoader(meshdata.train_dataset, batch_size=1, shuffle=False)
 
-    inputTensor = getInputData(polydata)
-    inputTensor = (inputTensor - mean) / std
-    inputTensor = inputTensor.to(device)
-
-    x = meshdata.train_dataset[10].x.unsqueeze(0).to(device)
-
-
-    # x = inputTensor
-    out = model(x)
-    loss = torch.nn.functional.l1_loss(out, x, reduction='mean')
-    print(loss.item())
+    x = meshdata.train_dataset[10].x.unsqueeze(0)
+    
+    # # x = inputTensor
+    # out = model(x)
+    # out = (x.cpu() * std) +mean 
 
 
-    out = (x.cpu() * std) +mean 
+    samples = [
+        meshdata.train_dataset[10].x.unsqueeze(0),
+        meshdata.train_dataset[5768].x.unsqueeze(0),
+        meshdata.train_dataset[8654].x.unsqueeze(0),
+        meshdata.train_dataset[2054].x.unsqueeze(0)
+    ]
 
-    outpoly = getOutputPoly(polydata, out)
-
-    actor = MakeActor(outpoly)
-
-    ren.AddActor(actor)
+    
+    #Add Interactor Style
+    interactorStyle = LatentInteractorStyle(model, x, std, mean, samples)
+    iren.SetInteractorStyle(interactorStyle)
+    
     renWin.Render()
     iren.Initialize()
     iren.Start()
-
-    exit()
-
-
-
-    # inputTensor = getInputData(polydata)
-    # # inputTensor = (inputTensor - mean) / std
-    # inputTensor = inputTensor.to(device)
-
-    # pred = model(inputTensor)
-    # # pred = (pred.cpu() * std) + mean
-    # output = getOutputPoly(polydata, pred)
-
-
-
-    # actor = MakeActor(output)
-
-    # ren.AddActor(actor)
-
-    # renWin.Render()
-    # iren.Initialize()
-    # iren.Start()
 
 
 
