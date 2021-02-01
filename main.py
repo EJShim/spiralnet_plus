@@ -6,11 +6,13 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
-from psbody.mesh import Mesh
+import vtk
+# from psbody.mesh import Mesh
 
 from reconstruction import AE, run, eval_error
 from datasets import MeshData
 from utils import utils, writer, DataLoader, mesh_sampling
+from utils.mesh_sampling import Mesh
 
 parser = argparse.ArgumentParser(description='mesh autoencoder')
 parser.add_argument('--exp_name', type=str, default='interpolation_exp')
@@ -47,13 +49,14 @@ parser.add_argument('--seed', type=int, default=1)
 args = parser.parse_args()
 
 args.work_dir = osp.dirname(osp.realpath(__file__))
-args.data_fp = osp.join(args.work_dir, '..', 'data', args.dataset)
+args.data_fp = osp.join(args.work_dir, 'data', args.dataset)
 args.out_dir = osp.join(args.work_dir, 'out', args.exp_name)
 args.checkpoints_dir = osp.join(args.out_dir, 'checkpoints')
-print(args)
+
 
 utils.makedirs(args.out_dir)
 utils.makedirs(args.checkpoints_dir)
+
 
 writer = writer.Writer(args)
 device = torch.device('cuda', args.device_idx)
@@ -64,22 +67,32 @@ torch.manual_seed(args.seed)
 cudnn.benchmark = False
 cudnn.deterministic = True
 
+
 # load dataset
 template_fp = osp.join(args.data_fp, 'template', 'template.obj')
 meshdata = MeshData(args.data_fp,
                     template_fp,
                     split=args.split,
                     test_exp=args.test_exp)
+
+
 train_loader = DataLoader(meshdata.train_dataset,
                           batch_size=args.batch_size,
                           shuffle=True)
 test_loader = DataLoader(meshdata.test_dataset, batch_size=args.batch_size)
 
+
 # generate/load transform matrices
 transform_fp = osp.join(args.data_fp, 'transform.pkl')
 if not osp.exists(transform_fp):
     print('Generating transform matrices...')
-    mesh = Mesh(filename=template_fp)
+
+    reader = vtk.vtkOBJReader()
+    reader.SetFileName(template_fp)
+    reader.Update()
+    mesh = Mesh()
+    mesh.SetPolyData(reader.GetOutput())
+
     ds_factors = [4, 4, 4, 4]
     _, A, D, U, F, V = mesh_sampling.generate_transform_matrices(
         mesh, ds_factors)
@@ -113,6 +126,7 @@ up_transform_list = [
     utils.to_sparse(up_transform).to(device)
     for up_transform in tmp['up_transform']
 ]
+
 
 model = AE(args.in_channels, args.out_channels, args.latent_channels,
            spiral_indices_list, down_transform_list,
