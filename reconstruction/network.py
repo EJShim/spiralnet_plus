@@ -46,15 +46,16 @@ class SpiralDeblock(nn.Module):
 
 class AE(nn.Module):
     def __init__(self, in_channels, out_channels, latent_channels,
-                 spiral_indices, down_transform, up_transform):
+                 spiral_indices, down_transform, up_transform, std = None, mean = None):
         super(AE, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.latent_channels = latent_channels
-        self.latent_channels = latent_channels
         self.spiral_indices = spiral_indices
         self.down_transform = down_transform
         self.up_transform = up_transform
+        self.std = std
+        self.mean = mean
         self.num_vert = self.down_transform[-1].size(0)
 
         # encoder
@@ -98,6 +99,11 @@ class AE(nn.Module):
                 nn.init.xavier_uniform_(param)
 
     def encoder(self, x):
+
+        #Normalize
+        if not self.std == None and not self.mean == None:
+            x = (x - self.mean) / self.std            
+
         for i, layer in enumerate(self.en_layers):
             if i != len(self.en_layers) - 1:
                 x = layer(x, self.down_transform[i])
@@ -117,6 +123,10 @@ class AE(nn.Module):
                 x = layer(x, self.up_transform[num_features - i])
             else:
                 x = layer(x)
+
+        if not self.std == None and not self.mean == None:
+            x = x*self.std + self.mean
+
         return x
 
     def forward(self, x, *indices):

@@ -7,11 +7,13 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
 import vtk
-# from psbody.mesh import Mesh
+import glob
+
 
 from reconstruction import AE, run, eval_error
-from datasets import MeshData
-from utils import utils, writer, DataLoader, mesh_sampling
+from datasets import MeshData, PLYDataset
+from torch.utils.data import DataLoader
+from utils import utils, mesh_sampling
 from utils.mesh_sampling import Mesh
 
 parser = argparse.ArgumentParser(description='mesh autoencoder')
@@ -58,7 +60,6 @@ utils.makedirs(args.out_dir)
 utils.makedirs(args.checkpoints_dir)
 
 
-writer = writer.Writer(args)
 device = torch.device('cuda', args.device_idx)
 torch.set_num_threads(args.n_threads)
 
@@ -68,15 +69,31 @@ cudnn.benchmark = False
 cudnn.deterministic = True
 
 
-# load dataset
-template_fp = osp.join(args.data_fp, 'template', 'template.obj')
-meshdata = MeshData(args.data_fp, template_fp, split=args.split, test_exp=args.test_exp)
 
-train_loader = DataLoader(meshdata.train_dataset, batch_size=args.batch_size, shuffle=True)
-test_loader = DataLoader(meshdata.test_dataset, batch_size=args.batch_size)
+
+
+#Meake Dataset
+files = glob.glob("data/CoMA/raw/**/*.ply", recursive=True)
+trainDataset = PLYDataset(files[:19000])
+testDataset = PLYDataset(files[19000:])
+
+train_loader = DataLoader(trainDataset, batch_size=args.batch_size, shuffle=True)
+test_loader = DataLoader(testDataset, batch_size=args.batch_size, shuffle=False)
+
+#Calculate Mean and Std of Trainset
+print("Calculating Mean and Std...")
+tensors = []
+for idx, data in enumerate(train_loader):
+    tensors.append(data)
+result = torch.cat(tensors, 0)
+
+print("Done")
+std = result.std(dim=0).to(device)
+mean = result.mean(dim=0).to(device)
 
 
 # generate/load transform matrices
+template_fp = osp.join(args.data_fp, 'template', 'template.obj')
 transform_fp = osp.join(args.data_fp, 'transform.pkl')
 if not osp.exists(transform_fp):
     print('Generating transform matrices...')
@@ -122,13 +139,11 @@ up_transform_list = [
 ]
 
 
-model = AE(args.in_channels, args.out_channels, args.latent_channels, spiral_indices_list, down_transform_list, up_transform_list).to(device)
+model = AE(args.in_channels, args.out_channels, args.latent_channels, spiral_indices_list, down_transform_list, up_transform_list, std, mean).to(device)
 print('Number of parameters: {}'.format(utils.count_parameters(model)))
-print(meshdata.mean, meshdata.std)
 
-exit()
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.decay_step, gamma=args.lr_decay)
 
-run(model, train_loader, test_loader, args.epochs, optimizer, scheduler, writer, device)
-eval_error(model, test_loader, device, meshdata, args.out_dir)
+run(model, train_loader, test_loader, args.epochs, optimizer, scheduler, args.checkpoints_dir, device)
+# eval_error(model, test_loader, device, meshdata, args.out_dir)

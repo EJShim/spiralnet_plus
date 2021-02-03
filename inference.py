@@ -1,7 +1,6 @@
 import vtk
 import os
-import pickle
-import utils
+import glob
 import torch
 from reconstruction import AE
 import numpy as np
@@ -85,7 +84,7 @@ def MakeActor(polydata):
 
 class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
-    def __init__(self, model, target, std, mean, samples, parent=None):
+    def __init__(self, model, samples, parent=None):
 
 
         
@@ -95,8 +94,6 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
 
         self.model = model
-        self.mean = mean
-        self.std = std
 
 
         #Initialize Plane        
@@ -116,8 +113,11 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
 
         #ADd Target Actor
-        target = target*std +mean
-        self.polydata = getOutputPoly(polydata, target)
+        reader = vtk.vtkPLYReader()
+        reader.SetFileName(samples[0])
+        reader.Update()
+
+        self.polydata = reader.GetOutput()
         self.actor = MakeActor(self.polydata)
         ren.AddActor(self.actor)
 
@@ -137,16 +137,23 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         self.outputLatents = []
         #Add Sample Actor
         for idx, sample in enumerate(samples):
-
-            #ADd Target Actor
-            z = self.model.encoder(sample.to(device))
-            self.latentSize = z.shape[1]
-            self.outputLatents.append(z[0])
-            sample = sample*std +mean
-            outpoly = getOutputPoly(polydata, sample)
-            actor = MakeActor(outpoly)
+            
+            sampleReader = vtk.vtkPLYReader()
+            sampleReader.SetFileName(sample)
+            sampleReader.Update()
+            samplePoly = sampleReader.GetOutput()
+            actor = MakeActor(samplePoly)
             actor.SetPosition(self.latentPositions[idx])
             ren.AddActor(actor)
+
+
+
+            #ADd Target Actor
+            sampleBatch = getInputData(samplePoly)
+            z = self.model.encoder(sampleBatch.to(device))
+            self.latentSize = z.shape[1]
+            self.outputLatents.append(z[0])
+            
 
         self.pickedPosition = -1
             
@@ -210,10 +217,10 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         
 
         out = self.model.decoder(calculatedLatent)
-        out = out.detach().cpu()
+        # out = out.detach().cpu()
 
-        target = out*self.std + self.mean
-        updatePoly(self.polydata, target)
+        # target = out*self.std + self.mean
+        updatePoly(self.polydata, out.detach().cpu())
         renWin.Render()
 
 
@@ -224,62 +231,36 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
 
 if __name__ == "__main__":
-    
-    dilation = [1, 1, 1, 1]
-    seq_length = [9, 9, 9, 9]
-
-    transform_fp = os.path.join( "data", "CoMA", "transform.pkl" )
-    with open(transform_fp, 'rb') as f:
-        tmp = pickle.load(f, encoding='latin1')
-
-    spiral_indices_list = [
-        utils.preprocess_spiral(tmp['face'][idx], seq_length[idx], tmp['vertices'][idx], dilation[idx]).to(device)
-        for idx in range(len(tmp['face']) - 1)
-    ]
-    down_transform_list = [
-        utils.to_sparse(down_transform).to(device)
-        for down_transform in tmp['down_transform']
-    ]
-    up_transform_list = [
-        utils.to_sparse(up_transform).to(device)
-        for up_transform in tmp['up_transform']
-    ]
 
 
-    meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth")
-    
-
-    mean = meshdata.mean
-    std = meshdata.std
+    dataList = glob.glob( "data/CoMA/**/*.ply", recursive=True )
 
 
 
-
-    model = AE(3, [32, 32, 32,64], 16, spiral_indices_list, down_transform_list, up_transform_list).to(device)
-    checkpoint = torch.load("out/interpolation_exp/checkpoints/checkpoint_300.pt")
+    checkpoint = torch.load("out/test/checkpoints/checkpoint_068.tar")
+    model = AE(checkpoint['in_channels'],
+                checkpoint['out_channels'], 
+                checkpoint['latent_channels'], 
+                checkpoint['spiral_indices'], 
+                checkpoint['down_transform'], 
+                checkpoint['up_transform'],
+                checkpoint['std'].to(device),
+                checkpoint['mean'].to(device)
+                ).to(device)
     model.load_state_dict( checkpoint["model_state_dict"] )
     model.eval()
 
-    print(len(meshdata.train_dataset))
-    train_loader = DataLoader(meshdata.train_dataset, batch_size=1, shuffle=False)
-
-    x = meshdata.train_dataset[10].x.unsqueeze(0)
-    
-    # # x = inputTensor
-    # out = model(x)
-    # out = (x.cpu() * std) +mean 
-
 
     samples = [
-        meshdata.train_dataset[10].x.unsqueeze(0),
-        meshdata.train_dataset[5768].x.unsqueeze(0),
-        meshdata.train_dataset[8654].x.unsqueeze(0),
-        meshdata.train_dataset[2054].x.unsqueeze(0)
+        dataList[10],
+        dataList[5768],
+        dataList[8654],
+        dataList[2054]
     ]
 
     
     #Add Interactor Style
-    interactorStyle = LatentInteractorStyle(model, x, std, mean, samples)
+    interactorStyle = LatentInteractorStyle(model, samples)
     iren.SetInteractorStyle(interactorStyle)
     
     renWin.Render()

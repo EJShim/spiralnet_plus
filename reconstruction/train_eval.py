@@ -4,8 +4,7 @@ import torch
 import torch.nn.functional as F
 
 
-def run(model, train_loader, test_loader, epochs, optimizer, scheduler, writer,
-        device):
+def run(model, train_loader, test_loader, epochs, optimizer, scheduler, ckptPath, device):
     train_losses, test_losses = [], []
 
     for epoch in range(1, epochs + 1):
@@ -21,9 +20,25 @@ def run(model, train_loader, test_loader, epochs, optimizer, scheduler, writer,
             'test_loss': test_loss,
             't_duration': t_duration
         }
+        message = 'Epoch: {}/{}, Duration: {:.3f}s, Train Loss: {:.4f}, Test Loss: {:.4f}' .format(info['current_epoch'], info['epochs'], info['t_duration'], info['train_loss'], info['test_loss'])
+        print(message)
 
-        writer.print_info(info)
-        writer.save_checkpoint(model, optimizer, scheduler, epoch)
+        torch.save(
+            {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'in_channels' : model.in_channels,
+                'out_channels' : model.out_channels,
+                'latent_channels' : model.latent_channels,
+                'spiral_indices' : model.spiral_indices,
+                'down_transform' : model.down_transform,
+                'up_transform' : model.up_transform,
+                'std' : model.std.cpu(),
+                'mean' : model.mean.cpu(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+            },
+        os.path.join(ckptPath, 'checkpoint_{:03d}.tar'.format(epoch)))
 
 
 def train(model, optimizer, loader, device):
@@ -32,7 +47,7 @@ def train(model, optimizer, loader, device):
     total_loss = 0
     for data in loader:
         optimizer.zero_grad()
-        x = data.x.to(device)
+        x = data.to(device)
         out = model(x)
         loss = F.l1_loss(out, x, reduction='mean')
         loss.backward()
@@ -47,7 +62,7 @@ def test(model, loader, device):
     total_loss = 0
     with torch.no_grad():
         for i, data in enumerate(loader):
-            x = data.x.to(device)
+            x = data.to(device)
             pred = model(x)
             total_loss += F.l1_loss(pred, x, reduction='mean')
     return total_loss / len(loader)
