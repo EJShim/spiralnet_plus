@@ -233,11 +233,11 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 if __name__ == "__main__":
 
 
-    dataList = glob.glob( "data/CoMA/**/*.ply", recursive=True )
+    dataList = glob.glob( "data/FAUST/**/*.ply", recursive=True )
 
 
 
-    checkpoint = torch.load("out/test/checkpoints/checkpoint_068.tar")
+    checkpoint = torch.load("out/test/checkpoints/checkpoint_544.tar")
     model = AE(checkpoint['in_channels'],
                 checkpoint['out_channels'], 
                 checkpoint['latent_channels'], 
@@ -253,9 +253,9 @@ if __name__ == "__main__":
 
     samples = [
         dataList[10],
-        dataList[5768],
-        dataList[8654],
-        dataList[2054]
+        dataList[35],
+        dataList[57],
+        dataList[73]
     ]
 
     

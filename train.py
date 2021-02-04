@@ -17,10 +17,10 @@ from utils import utils, mesh_sampling
 from utils.mesh_sampling import Mesh
 
 parser = argparse.ArgumentParser(description='mesh autoencoder')
-parser.add_argument('--exp_name', type=str, default='interpolation_exp')
-parser.add_argument('--dataset', type=str, default='CoMA')
-parser.add_argument('--split', type=str, default='interpolation')
-parser.add_argument('--test_exp', type=str, default='bareteeth')
+parser.add_argument('--inputs', type=str, default='data/CoMA')
+parser.add_argument('--outputs', type=str, default='out')
+parser.add_argument('--exp_name', type=str, default='test')
+
 parser.add_argument('--n_threads', type=int, default=4)
 parser.add_argument('--device_idx', type=int, default=0)
 
@@ -50,16 +50,12 @@ parser.add_argument('--seed', type=int, default=1)
 
 args = parser.parse_args()
 
-args.work_dir = osp.dirname(osp.realpath(__file__))
-args.data_fp = osp.join(args.work_dir, 'data', args.dataset)
-args.out_dir = osp.join(args.work_dir, 'out', args.exp_name)
-args.checkpoints_dir = osp.join(args.out_dir, 'checkpoints')
+#Prewpare OutputDirectory
+checkpoints_dir = osp.join(args.outputs, args.exp_name, 'checkpoints')
+os.makedirs(checkpoints_dir)
 
 
-utils.makedirs(args.out_dir)
-utils.makedirs(args.checkpoints_dir)
-
-
+#Prepare some Hardware things
 device = torch.device('cuda', args.device_idx)
 torch.set_num_threads(args.n_threads)
 
@@ -69,13 +65,13 @@ cudnn.benchmark = False
 cudnn.deterministic = True
 
 
-
-
-
 #Meake Dataset
-files = glob.glob("data/CoMA/raw/**/*.ply", recursive=True)
-trainDataset = PLYDataset(files[:19000])
-testDataset = PLYDataset(files[19000:])
+files = glob.glob( os.path.join(args.inputs, "raw", "**", "*.ply"), recursive=True)
+
+
+nTrain = int( len(files) * 9 / 10)
+trainDataset = PLYDataset(files[:nTrain])
+testDataset = PLYDataset(files[nTrain:])
 
 train_loader = DataLoader(trainDataset, batch_size=args.batch_size, shuffle=True)
 test_loader = DataLoader(testDataset, batch_size=args.batch_size, shuffle=False)
@@ -92,14 +88,12 @@ std = result.std(dim=0).to(device)
 mean = result.mean(dim=0).to(device)
 
 
-# generate/load transform matrices
-template_fp = osp.join(args.data_fp, 'template', 'template.obj')
-transform_fp = osp.join(args.data_fp, 'transform.pkl')
+transform_fp = osp.join(args.inputs, 'transform.pkl')
 if not osp.exists(transform_fp):
     print('Generating transform matrices...')
 
-    reader = vtk.vtkOBJReader()
-    reader.SetFileName(template_fp)
+    reader = vtk.vtkPLYReader()
+    reader.SetFileName(files[0])
     reader.Update()
     mesh = Mesh()
     mesh.SetPolyData(reader.GetOutput())
@@ -114,7 +108,6 @@ if not osp.exists(transform_fp):
         'down_transform': D,
         'up_transform': U
     }
-
     with open(transform_fp, 'wb') as fp:
         pickle.dump(tmp, fp)
     print('Done!')
@@ -122,6 +115,9 @@ if not osp.exists(transform_fp):
 else:
     with open(transform_fp, 'rb') as f:
         tmp = pickle.load(f, encoding='latin1')
+
+
+
 
 spiral_indices_list = [
     utils.preprocess_spiral(tmp['face'][idx], args.seq_length[idx],
@@ -145,5 +141,5 @@ print('Number of parameters: {}'.format(utils.count_parameters(model)))
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.decay_step, gamma=args.lr_decay)
 
-run(model, train_loader, test_loader, args.epochs, optimizer, scheduler, args.checkpoints_dir, device)
+run(model, train_loader, test_loader, args.epochs, optimizer, scheduler, checkpoints_dir, device)
 # eval_error(model, test_loader, device, meshdata, args.out_dir)
