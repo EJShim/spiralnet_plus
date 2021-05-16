@@ -59,7 +59,10 @@ utils.makedirs(args.checkpoints_dir)
 
 
 writer = writer.Writer(args)
-device = torch.device('cuda', args.device_idx)
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+
 torch.set_num_threads(args.n_threads)
 
 # deterministic
@@ -113,10 +116,7 @@ else:
         tmp = pickle.load(f, encoding='latin1')
 
 spiral_indices_list = [
-    utils.preprocess_spiral(tmp['face'][idx], args.seq_length[idx],
-                            tmp['vertices'][idx],
-                            args.dilation[idx]).to(device)
-    for idx in range(len(tmp['face']) - 1)
+    utils.preprocess_spiral(tmp['face'][idx], args.seq_length[idx], tmp['vertices'][idx], args.dilation[idx]).to(device) for idx in range(len(tmp['face']) - 1)
 ]
 down_transform_list = [
     utils.to_sparse(down_transform).to(device)
@@ -141,6 +141,5 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
                                             args.decay_step,
                                             gamma=args.lr_decay)
 
-run(model, train_loader, test_loader, args.epochs, optimizer, scheduler,
-    writer, device)
+run(model, train_loader, test_loader, args.epochs, optimizer, scheduler, writer, device)
 eval_error(model, test_loader, device, meshdata, args.out_dir)

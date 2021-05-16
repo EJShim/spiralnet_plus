@@ -14,7 +14,14 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def to_sparse(spmat):
+def to_sparse(spmat, device):
+    result = {
+        "indices" : torch.LongTensor([spmat.tocoo().row, spmat.tocoo().col]).to(device),
+        "data" : torch.FloatTensor(spmat.tocoo().data).to(device), 
+        "size" : torch.Size(spmat.tocoo().shape)
+    }
+
+    return result
     return torch.sparse.FloatTensor(
         torch.LongTensor([spmat.tocoo().row, spmat.tocoo().col]),
         torch.FloatTensor(spmat.tocoo().data), torch.Size(spmat.tocoo().shape))

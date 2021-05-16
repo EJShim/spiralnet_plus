@@ -237,11 +237,11 @@ if __name__ == "__main__":
         for idx in range(len(tmp['face']) - 1)
     ]
     down_transform_list = [
-        utils.to_sparse(down_transform).to(device)
+        utils.to_sparse(down_transform, device)
         for down_transform in tmp['down_transform']
     ]
     up_transform_list = [
-        utils.to_sparse(up_transform).to(device)
+        utils.to_sparse(up_transform, device)
         for up_transform in tmp['up_transform']
     ]
 
@@ -255,8 +255,8 @@ if __name__ == "__main__":
 
 
 
-    model = AE(3, [32, 32, 32,64], 16, spiral_indices_list, down_transform_list, up_transform_list).to(device)
-    checkpoint = torch.load("out/interpolation_exp/checkpoints/checkpoint_300.pt")
+    model = AE(3, [32, 32, 32,64], 16, spiral_indices_list, down_transform_list, up_transform_list, std, mean).to(device)
+    checkpoint = torch.load("out/interpolation_exp/checkpoints/checkpoint_040.pt")
     model.load_state_dict( checkpoint["model_state_dict"] )
     model.eval()
 
