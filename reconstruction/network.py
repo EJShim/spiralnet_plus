@@ -100,6 +100,7 @@ class AE(nn.Module):
                 nn.init.xavier_uniform_(param)
 
     def encoder(self, x):
+        x = (x - self.mean) / self.std
         for i, layer in enumerate(self.en_layers):
             if i != len(self.en_layers) - 1:
                 x = layer(x, self.down_transform[i])
@@ -119,9 +120,10 @@ class AE(nn.Module):
                 x = layer(x, self.up_transform[num_features - i])
             else:
                 x = layer(x)
+        x = x*self.std + self.mean
         return x
 
     def forward(self, x, *indices):
         z = self.encoder(x)
-        out = self.decoder(z)
+        out = self.decoder(z)        
         return out

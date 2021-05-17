@@ -85,7 +85,7 @@ def MakeActor(polydata):
 
 class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
-    def __init__(self, model, target, std, mean, samples, parent=None):
+    def __init__(self, model, target, samples, parent=None):
 
 
         
@@ -93,10 +93,7 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         self.AddObserver("MouseMoveEvent", self.MouseMove)
         self.AddObserver("LeftButtonReleaseEvent", self.LeftButtonReleased)
 
-
-        self.model = model
-        self.mean = mean
-        self.std = std
+        self.model = model        
 
 
         #Initialize Plane        
@@ -116,7 +113,7 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
 
         #ADd Target Actor
-        target = target*std +mean
+        # target = target*std +mean
         self.polydata = getOutputPoly(polydata, target)
         self.actor = MakeActor(self.polydata)
         ren.AddActor(self.actor)
@@ -142,7 +139,7 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
             z = self.model.encoder(sample.to(device))
             self.latentSize = z.shape[1]
             self.outputLatents.append(z[0])
-            sample = sample*std +mean
+            
             outpoly = getOutputPoly(polydata, sample)
             actor = MakeActor(outpoly)
             actor.SetPosition(self.latentPositions[idx])
@@ -212,8 +209,8 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         out = self.model.decoder(calculatedLatent)
         out = out.detach().cpu()
 
-        target = out*self.std + self.mean
-        updatePoly(self.polydata, target)
+        
+        updatePoly(self.polydata, out)
         renWin.Render()
 
 
@@ -246,7 +243,7 @@ if __name__ == "__main__":
     ]
 
 
-    meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth")
+    meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth", normalize=False)
     
 
     mean = meshdata.mean
@@ -260,7 +257,7 @@ if __name__ == "__main__":
     model.load_state_dict( checkpoint["model_state_dict"] )
     model.eval()
 
-    print(len(meshdata.train_dataset))
+    
     train_loader = DataLoader(meshdata.train_dataset, batch_size=1, shuffle=False)
 
     x = meshdata.train_dataset[10].x.unsqueeze(0)
@@ -279,7 +276,7 @@ if __name__ == "__main__":
 
     
     #Add Interactor Style
-    interactorStyle = LatentInteractorStyle(model, x, std, mean, samples)
+    interactorStyle = LatentInteractorStyle(model, x, samples)
     iren.SetInteractorStyle(interactorStyle)
     
     renWin.Render()

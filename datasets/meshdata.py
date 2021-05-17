@@ -9,7 +9,8 @@ class MeshData(object):
                  split='interpolation',
                  test_exp='bareteeth',
                  transform=None,
-                 pre_transform=None):
+                 pre_transform=None,
+                 normalize = True):
         self.root = root
         self.template_fp = template_fp
         self.split = split
@@ -22,6 +23,7 @@ class MeshData(object):
         self.template_face = None
         self.mean = None
         self.std = None
+        self.normalize_data = normalize
         self.num_nodes = None
 
         self.load()
@@ -47,11 +49,11 @@ class MeshData(object):
 
         self.num_train_graph = len(self.train_dataset)
         self.num_test_graph = len(self.test_dataset)
-        self.mean = self.train_dataset.data.x.view(self.num_train_graph, -1,
-                                                   3).mean(dim=0)
-        self.std = self.train_dataset.data.x.view(self.num_train_graph, -1,
-                                                  3).std(dim=0)
-        self.normalize()
+        self.mean = self.train_dataset.data.x.view(self.num_train_graph, -1,3).mean(dim=0)
+        self.std = self.train_dataset.data.x.view(self.num_train_graph, -1,3).std(dim=0)
+        
+        if self.normalize_data:
+            self.normalize()
 
     def normalize(self):
         print('Normalizing...')
