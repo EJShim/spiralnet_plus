@@ -5,26 +5,9 @@ import utils
 import torch
 from reconstruction import AE
 import numpy as np
-from utils import DataLoader
+
 from datasets import MeshData
-
-#Initialize Renderer
-ren = vtk.vtkRenderer()
-ren.GradientBackgroundOn()
-ren.SetBackground(135/255, 206/255, 235/255)
-ren.SetBackground2(44/255, 125/255, 158/255)
-renWin = vtk.vtkRenderWindow()
-renWin.SetFullScreen(False)
-renWin.AddRenderer(ren)
-iren = vtk.vtkRenderWindowInteractor()
-iren.SetRenderWindow(renWin)
-
-#JPolydata
-reader  = vtk.vtkOBJReader()
-reader.SetFileName("data/CoMA/template/template.obj")
-reader.Update()
-polydata = reader.GetOutput()
-
+import onnxruntime
 #Set Torch device
 device = "cpu"
 if torch.cuda.is_available():
@@ -32,54 +15,21 @@ if torch.cuda.is_available():
 
 
 
+class Encoder(torch.nn.Module):
+    def __init__(self, model):
+        super(Encoder, self).__init__()
+        self.model = model
 
-def getInputData(polydata):
-    nPoints = polydata.GetNumberOfPoints()
+    def forward(self, x):
+        return self.model.encoder(x)
 
-    result = []
+class Decoder(torch.nn.Module):
+    def __init__(self, model):
+        super(Decoder, self).__init__()
+        self.model = model
 
-    for pid in range(nPoints):
-        point = polydata.GetPoint(pid)
-        result.append(point)
-
-
-    tensor = torch.tensor([result])
-
-    return tensor
-
-
-def getOutputPoly(polydata, pred):
-    output = vtk.vtkPolyData()
-    output.DeepCopy(polydata)
-
-    for pid, pos in enumerate(pred[0]):
-        output.GetPoints().SetPoint(pid, pos[0], pos[1], pos[2])
-    
-
-    output.GetPoints().Modified()
-
-    return output
-
-
-def updatePoly(polydata, pred):
-    for pid, pos in enumerate(pred[0]):
-        polydata.GetPoints().SetPoint(pid, pos[0], pos[1], pos[2])
-    
-
-    polydata.GetPoints().Modified()
-
-
-def MakeActor(polydata):
-    
-    #Visualize
-    mapper = vtk.vtkOpenGLPolyDataMapper()
-    mapper.SetInputData(polydata)
-    # mapper.SetFragmentShaderCode(frag)
-
-    actor = vtk.vtkActor()
-    actor.SetMapper(mapper)
-
-    return actor
+    def forward(self, z):
+        return self.model.decoder(z)
 
 
 
@@ -106,7 +56,7 @@ if __name__ == "__main__":
     ]
 
 
-    meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth")
+    meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth", normalize=False)
     
 
     mean = meshdata.mean
@@ -121,12 +71,44 @@ if __name__ == "__main__":
     model.eval()
 
 
+    encoder = Encoder(model)
+    decoder = Decoder(model)
+    
     dummy_input = torch.zeros([1,5023,3])
 
-    pred = model(dummy_input)
+    z = encoder(dummy_input)
+    print(z.shape)
+
+    z = torch.tensor([[0.7733, -3.6339,  4.1113, -1.9286,  0.1162, -0.2889, -0.1077,  2.8485, 5.5649,  0.4998, -2.8854, -3.3035,  2.3326,  5.0924, -1.2362,  1.8607]])
+    pred = decoder(z)
+    print(pred.shape)
+    
+    torch.onnx.export(
+        encoder, 
+        dummy_input, 
+        os.path.join( os.path.dirname(__file__), "spiralnet.onnx" ),
+        verbose = True,
+        do_constant_folding = True,
+        opset_version = 12,
+        input_names = ["input"],
+        output_names = ["output"],        
+    )
 
     torch.onnx.export(
-        model, dummy_input, os.path.join( os.path.dirname(__file__), "spiralnet.onnx" ),
+        encoder, 
+        dummy_input, 
+        os.path.join( os.path.dirname(__file__), "spiralnetEncoder.onnx" ),
+        verbose = True,
+        do_constant_folding = True,
+        opset_version = 12,
+        input_names = ["input"],
+        output_names = ["output"],        
+    )
+
+    torch.onnx.export(
+        decoder, 
+        z, 
+        os.path.join( os.path.dirname(__file__), "spiralnetDecoder.onnx" ),
         verbose = True,
         do_constant_folding = True,
         opset_version = 12,
@@ -138,3 +120,8 @@ if __name__ == "__main__":
 
 
 
+    #Evaluation
+    decoderSession = onnxruntime.InferenceSession(os.path.join( os.path.dirname(__file__), "spiralnetDecoder.onnx" ),)
+
+    onnxPred = decoderSession.run(None, {"input":z.detach().numpy()})[0]
+    print((onnxPred - pred.detach().numpy()))

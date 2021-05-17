@@ -98,7 +98,8 @@ class AE(nn.Module):
                 nn.init.constant_(param, 0)
             else:
                 nn.init.xavier_uniform_(param)
-
+    
+    @torch.jit.script
     def encoder(self, x):
         x = (x - self.mean) / self.std
         for i, layer in enumerate(self.en_layers):
@@ -121,6 +122,7 @@ class AE(nn.Module):
             else:
                 x = layer(x)
         x = x*self.std + self.mean
+        # x = x*100
         return x
 
     def forward(self, x, *indices):

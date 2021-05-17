@@ -32,6 +32,24 @@ if torch.cuda.is_available():
 
 
 
+class Encoder(torch.nn.Module):
+    def __init__(self, model):
+        super(Encoder, self).__init__()
+        self.model = model
+
+    def forward(self, x):
+        return self.model.encoder(x)
+
+class Decoder(torch.nn.Module):
+    def __init__(self, model):
+        super(Decoder, self).__init__()
+        self.model = model
+
+    def forward(self, z):
+        return self.model.decoder(z)
+
+
+
 
 def getInputData(polydata):
     nPoints = polydata.GetNumberOfPoints()
@@ -86,14 +104,14 @@ def MakeActor(polydata):
 class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
     def __init__(self, model, target, samples, parent=None):
-
-
         
         self.AddObserver("LeftButtonPressEvent", self.LeftButtonPressed)
         self.AddObserver("MouseMoveEvent", self.MouseMove)
         self.AddObserver("LeftButtonReleaseEvent", self.LeftButtonReleased)
 
-        self.model = model        
+        # self.model = model    
+        self.encoder = Encoder(model)   
+        self.decoder = Decoder(model) 
 
 
         #Initialize Plane        
@@ -136,9 +154,11 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         for idx, sample in enumerate(samples):
 
             #ADd Target Actor
-            z = self.model.encoder(sample.to(device))
+            z = self.encoder(sample.to(device))            
             self.latentSize = z.shape[1]
             self.outputLatents.append(z[0])
+
+            print(z)
             
             outpoly = getOutputPoly(polydata, sample)
             actor = MakeActor(outpoly)
@@ -205,10 +225,14 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         for idx, weight in enumerate(weights):
             calculatedLatent += self.outputLatents[idx] * weight
         
-
-        out = self.model.decoder(calculatedLatent)
+            
+        out = self.decoder(calculatedLatent)
         out = out.detach().cpu()
 
+        print(out)
+
+
+         
         
         updatePoly(self.polydata, out)
         renWin.Render()
@@ -261,11 +285,6 @@ if __name__ == "__main__":
     train_loader = DataLoader(meshdata.train_dataset, batch_size=1, shuffle=False)
 
     x = meshdata.train_dataset[10].x.unsqueeze(0)
-    
-    # # x = inputTensor
-    # out = model(x)
-    # out = (x.cpu() * std) +mean 
-
 
     samples = [
         meshdata.train_dataset[10].x.unsqueeze(0),
