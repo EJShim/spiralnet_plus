@@ -1,54 +1,10 @@
-import vtk
-import os
-import pickle
-import utils
-import torch
-from reconstruction import AE
+import sys, os
+
+import onnxruntime
 import numpy as np
-from utils import DataLoader
+import vtk
 from datasets import MeshData
-
-#Initialize Renderer
-ren = vtk.vtkRenderer()
-ren.GradientBackgroundOn()
-ren.SetBackground(135/255, 206/255, 235/255)
-ren.SetBackground2(44/255, 125/255, 158/255)
-renWin = vtk.vtkRenderWindow()
-renWin.SetFullScreen(False)
-renWin.AddRenderer(ren)
-iren = vtk.vtkRenderWindowInteractor()
-iren.SetRenderWindow(renWin)
-
-#JPolydata
-reader  = vtk.vtkOBJReader()
-reader.SetFileName("data/CoMA/template/template.obj")
-reader.Update()
-polydata = reader.GetOutput()
-
-#Set Torch device
-device = "cpu"
-if torch.cuda.is_available():
-    device = "cuda"
-
-
-
-class Encoder(torch.nn.Module):
-    def __init__(self, model):
-        super(Encoder, self).__init__()
-        self.model = model
-
-    def forward(self, x):
-        return self.model.encoder(x)
-
-class Decoder(torch.nn.Module):
-    def __init__(self, model):
-        super(Decoder, self).__init__()
-        self.model = model
-
-    def forward(self, z):
-        return self.model.decoder(z)
-
-
+curPath = os.path.dirname( os.path.abspath(__file__) )
 
 
 def getInputData(polydata):
@@ -61,7 +17,7 @@ def getInputData(polydata):
         result.append(point)
 
 
-    tensor = torch.tensor([result])
+    tensor = np.array([result])
 
     return tensor
 
@@ -80,7 +36,7 @@ def getOutputPoly(polydata, pred):
 
 
 def updatePoly(polydata, pred):
-    for pid, pos in enumerate(pred[0]):
+    for pid, pos in enumerate(pred[0]):        
         polydata.GetPoints().SetPoint(pid, pos[0], pos[1], pos[2])
     
 
@@ -99,19 +55,37 @@ def MakeActor(polydata):
 
     return actor
 
+#Initialize Renderer
+ren = vtk.vtkRenderer()
+ren.GradientBackgroundOn()
+ren.SetBackground(135/255, 206/255, 235/255)
+ren.SetBackground2(44/255, 125/255, 158/255)
+renWin = vtk.vtkRenderWindow()
+renWin.SetFullScreen(False)
+renWin.AddRenderer(ren)
+iren = vtk.vtkRenderWindowInteractor()
+iren.SetRenderWindow(renWin)
+
+#JPolydata
+reader  = vtk.vtkOBJReader()
+reader.SetFileName("data/CoMA/template/template.obj")
+reader.Update()
+polydata = reader.GetOutput()
 
 
 class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
-    def __init__(self, model, target, samples, parent=None):
+    def __init__(self, encoder, decoder, target, samples, parent=None):
+
+
         
         self.AddObserver("LeftButtonPressEvent", self.LeftButtonPressed)
         self.AddObserver("MouseMoveEvent", self.MouseMove)
         self.AddObserver("LeftButtonReleaseEvent", self.LeftButtonReleased)
 
-        # self.model = model    
-        self.encoder = Encoder(model)   
-        self.decoder = Decoder(model) 
+        
+        self.encoder = encoder
+        self.decoder = decoder
 
 
         #Initialize Plane        
@@ -154,7 +128,7 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         for idx, sample in enumerate(samples):
 
             #ADd Target Actor
-            z = self.encoder(sample.to(device))            
+            z = self.encoder.run(None,{"input":sample})[0]
             self.latentSize = z.shape[1]
             self.outputLatents.append(z[0])
 
@@ -220,19 +194,21 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         weights[weights > 1] = 1
         weights = 1 - weights
         
-        calculatedLatent = torch.zeros(self.latentSize).to(device)
+        calculatedLatent = np.zeros(self.latentSize, dtype=np.float32)
 
         for idx, weight in enumerate(weights):
             calculatedLatent += self.outputLatents[idx] * weight
-        
-            
-        out = self.decoder(calculatedLatent)
-        out = out.detach().cpu()
 
+
+        calculatedLatent = np.array([0.7733, -3.6339,  4.1113, -1.9286,  0.1162, -0.2889, -0.1077,  2.8485,
+         5.5649,  0.4998, -2.8854, -3.3035,  2.3326,  5.0924, -1.2362,  1.8607])
+        print(calculatedLatent)
+        
+         
+        out = self.decoder.run(None, {"input":[calculatedLatent]})[0]
         print(out)
 
 
-         
         
         updatePoly(self.polydata, out)
         renWin.Render()
@@ -242,65 +218,41 @@ class LatentInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
 
         self.pickedPosition = -1
         self.OnLeftButtonUp()
-
-
 if __name__ == "__main__":
+        
+    dummy_data = np.zeros([1,5023,3], dtype=np.float32)
+
     
-    dilation = [1, 1, 1, 1]
-    seq_length = [9, 9, 9, 9]
+    encoderSession = onnxruntime.InferenceSession(os.path.join(curPath, "spiralnetEncoder.onnx"))
+    decoderSession = onnxruntime.InferenceSession(os.path.join(curPath, "spiralnetDecoder.onnx"))
+    
+    
+    input_tensor = {"input" : dummy_data}
+    z = encoderSession.run(None, input_tensor)    
 
-    transform_fp = os.path.join( "data", "CoMA", "transform.pkl" )
-    with open(transform_fp, 'rb') as f:
-        tmp = pickle.load(f, encoding='latin1')
+    z_tensor = {"input": z[0]}
+    pred = decoderSession.run(None, z_tensor)    
 
-    spiral_indices_list = [
-        utils.preprocess_spiral(tmp['face'][idx], seq_length[idx], tmp['vertices'][idx], dilation[idx]).to(device)
-        for idx in range(len(tmp['face']) - 1)
-    ]
-    down_transform_list = [
-        utils.to_sparse(down_transform, device)
-        for down_transform in tmp['down_transform']
-    ]
-    up_transform_list = [
-        utils.to_sparse(up_transform, device)
-        for up_transform in tmp['up_transform']
-    ]
 
 
     meshdata = MeshData("data/CoMA", "data/CoMA/template/template.obj", split="interpolation", test_exp="bareteeth", normalize=False)
-    
 
-    mean = meshdata.mean
-    std = meshdata.std
-
-
-
-
-    model = AE(3, [32, 32, 32,64], 16, spiral_indices_list, down_transform_list, up_transform_list, std, mean).to(device)
-    checkpoint = torch.load("out/interpolation_exp/checkpoints/checkpoint_040.pt")
-    model.load_state_dict( checkpoint["model_state_dict"] )
-    model.eval()
-
-    
-    train_loader = DataLoader(meshdata.train_dataset, batch_size=1, shuffle=False)
-
-    x = meshdata.train_dataset[10].x.unsqueeze(0)
+    x = meshdata.train_dataset[10].x.unsqueeze(0).numpy()
 
     samples = [
-        meshdata.train_dataset[10].x.unsqueeze(0),
-        meshdata.train_dataset[5768].x.unsqueeze(0),
-        meshdata.train_dataset[8654].x.unsqueeze(0),
-        meshdata.train_dataset[2054].x.unsqueeze(0)
+        meshdata.train_dataset[10].x.unsqueeze(0).numpy(),
+        meshdata.train_dataset[5768].x.unsqueeze(0).numpy(),
+        meshdata.train_dataset[8654].x.unsqueeze(0).numpy(),
+        meshdata.train_dataset[2054].x.unsqueeze(0).numpy()
     ]
 
-    
-    #Add Interactor Style
-    interactorStyle = LatentInteractorStyle(model, x, samples)
+
+    interactorStyle = LatentInteractorStyle(encoderSession, decoderSession, x, samples)
+
+
+
     iren.SetInteractorStyle(interactorStyle)
     
     renWin.Render()
     iren.Initialize()
     iren.Start()
-
-
-

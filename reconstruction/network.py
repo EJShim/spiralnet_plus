@@ -7,10 +7,10 @@ from conv import SpiralConv
 
 
 def Pool(x, trans, dim=1):
-    row, col = trans._indices()
-    value = trans._values().unsqueeze(-1)
+    row, col = trans["indices"]
+    value = trans["data"].unsqueeze(-1)
     out = torch.index_select(x, dim, col) * value
-    out = scatter_add(out, row, dim, dim_size=trans.size(0))
+    out = scatter_add(out, row, dim, dim_size=trans["size"][0])
     return out
 
 
@@ -46,7 +46,7 @@ class SpiralDeblock(nn.Module):
 
 class AE(nn.Module):
     def __init__(self, in_channels, out_channels, latent_channels,
-                 spiral_indices, down_transform, up_transform):
+                 spiral_indices, down_transform, up_transform, std, mean):
         super(AE, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -55,7 +55,9 @@ class AE(nn.Module):
         self.spiral_indices = spiral_indices
         self.down_transform = down_transform
         self.up_transform = up_transform
-        self.num_vert = self.down_transform[-1].size(0)
+        self.num_vert = self.down_transform[-1]["size"][0]
+        self.std = std
+        self.mean = mean
 
         # encoder
         self.en_layers = nn.ModuleList()
@@ -96,8 +98,10 @@ class AE(nn.Module):
                 nn.init.constant_(param, 0)
             else:
                 nn.init.xavier_uniform_(param)
-
+    
+    @torch.jit.script
     def encoder(self, x):
+        x = (x - self.mean) / self.std
         for i, layer in enumerate(self.en_layers):
             if i != len(self.en_layers) - 1:
                 x = layer(x, self.down_transform[i])
@@ -117,9 +121,11 @@ class AE(nn.Module):
                 x = layer(x, self.up_transform[num_features - i])
             else:
                 x = layer(x)
+        x = x*self.std + self.mean
+        # x = x*100
         return x
 
     def forward(self, x, *indices):
         z = self.encoder(x)
-        out = self.decoder(z)
+        out = self.decoder(z)        
         return out
